@@ -146,6 +146,29 @@ type HarnessEnvVar struct {
 	CredentialRef *corev1.SecretKeySelector `json:"credentialRef,omitempty"`
 }
 
+// HostCredential binds one Secret key to one HTTP header on one host.
+type HostCredential struct {
+	// Host is an exact DNS hostname, such as github.com. Substrate matches
+	// hostnames only, without port, path, or scheme.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +required
+	Host string `json:"host"`
+
+	// Header is the HTTP header the gateway sets, such as Authorization.
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	Header string `json:"header"`
+
+	// Prefix is written before the Secret value, such as "Bearer " or "Basic ".
+	// +optional
+	Prefix string `json:"prefix,omitempty"`
+
+	// SecretRef selects a key of a Secret in the Harness namespace.
+	// +required
+	SecretRef corev1.SecretKeySelector `json:"secretRef"`
+}
+
 // HarnessSnapshotPolicy configures storage for Substrate snapshots.
 type HarnessSnapshotPolicy struct {
 	// Location is the snapshot storage location used by Substrate.
@@ -203,6 +226,14 @@ type HarnessSpec struct {
 
 	// +required
 	Substrate HarnessSubstratePolicy `json:"substrate"`
+
+	// HostCredentials binds Secrets to hosts. The egress gateway sets each
+	// header on every request the runtime makes to its host, whatever the
+	// protocol or path, and the host is added to the runtime's egress. The
+	// runtime never holds the value.
+	// +optional
+	// +kubebuilder:validation:MaxItems=32
+	HostCredentials []HostCredential `json:"hostCredentials,omitempty"`
 
 	// AllowedAgentTemplates selects AgentTemplates this Harness admits.
 	// When omitted, the Harness admits none.

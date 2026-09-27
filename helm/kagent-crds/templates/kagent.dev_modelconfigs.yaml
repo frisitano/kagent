@@ -53,6 +53,16 @@ spec:
               anthropic:
                 description: Anthropic-specific configuration
                 properties:
+                  authentication:
+                    description: |-
+                      Authentication selects how the gateway presents apiKeySecret. APIKey
+                      (the default) sets x-api-key. OAuthToken sets "Authorization: Bearer",
+                      for a Claude subscription token made by `claude setup-token`; only the
+                      claude harness supports it.
+                    enum:
+                    - APIKey
+                    - OAuthToken
+                    type: string
                   baseUrl:
                     description: Base URL for the Anthropic API (overrides default)
                     type: string

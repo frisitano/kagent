@@ -41,6 +41,16 @@ func TestCompileProviderCredentials(t *testing.T) {
 			wantEgress: []string{"api.anthropic.com", "kagent-controller.kagent"},
 		},
 		{
+			name: "Anthropic OAuth token",
+			model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, Model: "claude-sonnet-4-5",
+				APIKeySecret: "model-auth", APIKeySecretKey: "api-key",
+				Anthropic: &v1alpha3.AnthropicConfig{Authentication: v1alpha3.AnthropicAuthenticationOAuthToken}},
+			secretData: map[string][]byte{"api-key": []byte(credentialValue)},
+			wantEnv: map[string]string{claudeconfig.ClaudeCodeOAuthTokenEnvName: v2translator.CredentialPlaceholder,
+				claudeconfig.AnthropicAPIKeyEnvName: ""},
+			wantEgress: []string{"api.anthropic.com", "kagent-controller.kagent"},
+		},
+		{
 			name: "Anthropic gateway",
 			model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, Model: "claude-sonnet-4-5",
 				APIKeySecret: "model-auth", APIKeySecretKey: "api-key",

@@ -146,7 +146,23 @@ type AnthropicConfig struct {
 	// Top-k sampling parameter
 	// +optional
 	TopK int `json:"topK,omitempty"`
+
+	// Authentication selects how the gateway presents apiKeySecret. APIKey
+	// (the default) sets x-api-key. OAuthToken sets "Authorization: Bearer",
+	// for a Claude subscription token made by `claude setup-token`; only the
+	// claude harness supports it.
+	// +optional
+	Authentication AnthropicAuthentication `json:"authentication,omitempty"`
 }
+
+// AnthropicAuthentication selects the credential form for the Anthropic provider.
+// +kubebuilder:validation:Enum=APIKey;OAuthToken
+type AnthropicAuthentication string
+
+const (
+	AnthropicAuthenticationAPIKey     AnthropicAuthentication = "APIKey"
+	AnthropicAuthenticationOAuthToken AnthropicAuthentication = "OAuthToken"
+)
 
 // TokenExchangeType identifies the token exchange mechanism
 // +kubebuilder:validation:Enum=GDCHServiceAccount

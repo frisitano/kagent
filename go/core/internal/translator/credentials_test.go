@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
+	"github.com/kagent-dev/kagent/go/core/internal/egress"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +19,7 @@ func TestCompileCredentialDestinations(t *testing.T) {
 		{"OpenAI", v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderOpenAI}, "OPENAI_API_KEY", "api.openai.com", "authorization", "Bearer "},
 		{"OpenAI override", v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderOpenAI, OpenAI: &v1alpha3.OpenAIConfig{BaseURL: "https://models.example.com/v1"}}, "OPENAI_API_KEY", "models.example.com", "authorization", "Bearer "},
 		{"Anthropic", v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic}, "ANTHROPIC_API_KEY", "api.anthropic.com", "x-api-key", ""},
+		{"Anthropic OAuth token", v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, Anthropic: &v1alpha3.AnthropicConfig{Authentication: v1alpha3.AnthropicAuthenticationOAuthToken}}, "CLAUDE_CODE_OAUTH_TOKEN", "api.anthropic.com", "authorization", "Bearer "},
 		{"Azure", v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAzureOpenAI, AzureOpenAI: &v1alpha3.AzureOpenAIConfig{Endpoint: "https://team.openai.azure.com"}}, "AZURE_OPENAI_API_KEY", "team.openai.azure.com", "api-key", ""},
 		{"Gemini", v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderGemini}, "GOOGLE_API_KEY", "generativelanguage.googleapis.com", "x-goog-api-key", ""},
 		{"Foundry OpenAI", v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderFoundry, Foundry: &v1alpha3.FoundryConfig{Endpoint: "https://team.services.ai.azure.com"}}, "FOUNDRY_API_KEY", "team.services.ai.azure.com", "api-key", ""},
@@ -57,6 +59,27 @@ func TestCompileCredentialsRejectsConflictingSharedModels(t *testing.T) {
 	_, bindings, err := CompileCredentials(input, nil, []corev1.EnvVar{credentialEnv("OPENAI_API_KEY", "child", "token")})
 	require.NoError(t, err)
 	require.Len(t, bindings, 2)
+}
+
+func TestCompileHostCredentials(t *testing.T) {
+	input := credentialInput(v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, APIKeySecret: "auth", APIKeySecretKey: "token"})
+	input.Harness.Spec.HostCredentials = []v1alpha3.HostCredential{{
+		Host: "GitHub.com.", Header: "Authorization", Prefix: "Basic ",
+		SecretRef: *credentialEnv("", "git", "basic").ValueFrom.SecretKeyRef,
+	}}
+	_, bindings, err := CompileCredentials(input, nil, []corev1.EnvVar{credentialEnv("ANTHROPIC_API_KEY", "auth", "token")})
+	require.NoError(t, err)
+	require.Len(t, bindings, 2)
+	require.Equal(t, "api.anthropic.com", bindings[0].Hostname)
+	// A host credential needs no runtime variable: nothing reaches the Actor.
+	require.Equal(t, egress.Credential{Hostname: "github.com", Header: "authorization", Prefix: "Basic ", URI: "ate-secret://kubernetes.io/team/git/basic"}, bindings[1])
+
+	input.Harness.Spec.HostCredentials[0].Host, input.Harness.Spec.HostCredentials[0].Header = "api.anthropic.com", "x-api-key"
+	_, _, err = CompileCredentials(input, nil, []corev1.EnvVar{credentialEnv("ANTHROPIC_API_KEY", "auth", "token")})
+	require.ErrorContains(t, err, "conflicting credentials")
+	input.Harness.Spec.HostCredentials[0].Host = "https://github.com"
+	_, _, err = CompileCredentials(input, nil, []corev1.EnvVar{credentialEnv("ANTHROPIC_API_KEY", "auth", "token")})
+	require.ErrorContains(t, err, "exact DNS hostname")
 }
 
 func TestCompileCredentialsRejectsLocalSecrets(t *testing.T) {
