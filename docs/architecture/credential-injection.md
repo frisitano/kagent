@@ -51,11 +51,18 @@ overrides of these variables are rejected.
 | --- | --- |
 | OpenAI API key | `authorization: Bearer <key>` |
 | Anthropic API key | `x-api-key: <key>` |
+| Anthropic OAuth token (`anthropic.authentication: OAuthToken`, claude harness only) | `authorization: Bearer <token>` |
 | Azure OpenAI and Foundry OpenAI API key | `api-key: <key>` |
 | Foundry Anthropic API key | `x-api-key: <key>` |
 | Gemini API key | `x-goog-api-key: <key>` |
 | Bedrock bearer token | `authorization: Bearer <token>` |
 | RemoteMCPServer Secret-backed header | Configured header; Secret contains its full value |
+| Harness `hostCredentials` | Configured header and prefix, on the configured host |
+
+A Harness host credential binds a Secret key to a header on one exact hostname
+and adds the host to the runtime's egress. The gateway sets the header on every
+request to that host, so it serves clients that are not MCP, such as git over
+HTTPS, without a credential in the runtime.
 
 Provider endpoint overrides determine the injection destination. Substrate
 matches exact DNS hostnames, without path, port, or scheme scoping. Different

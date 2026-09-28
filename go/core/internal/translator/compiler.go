@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
 
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
 	"istio.io/istio/pkg/kube/krt"
@@ -111,6 +113,14 @@ func (c *Compiler) CompileAgentTemplate(ctx context.Context, harness *v1alpha3.H
 	if err != nil {
 		return nil, err
 	}
+	// A host credential is also the runtime's permission to reach that host.
+	for _, host := range harness.Spec.HostCredentials {
+		hostname := strings.TrimSuffix(strings.ToLower(host.Host), ".")
+		if !slices.Contains(result.Revision.EgressDestinations, hostname) {
+			result.Revision.EgressDestinations = append(result.Revision.EgressDestinations, hostname)
+		}
+	}
+	slices.Sort(result.Revision.EgressDestinations)
 	workerKey := types.NamespacedName{Namespace: harness.Namespace, Name: harness.Spec.Substrate.WorkerPoolRef.Name}
 	workerPool := krt.FetchOne(c.ctx, c.collections.WorkerPools, krt.FilterObjectName(workerKey))
 	if workerPool == nil {

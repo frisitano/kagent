@@ -163,6 +163,64 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              hostCredentials:
+                description: |-
+                  HostCredentials binds Secrets to hosts. The egress gateway sets each
+                  header on every request the runtime makes to its host, whatever the
+                  protocol or path, and the host is added to the runtime's egress. The
+                  runtime never holds the value.
+                items:
+                  description: HostCredential binds one Secret key to one HTTP header
+                    on one host.
+                  properties:
+                    header:
+                      description: Header is the HTTP header the gateway sets, such
+                        as Authorization.
+                      minLength: 1
+                      type: string
+                    host:
+                      description: |-
+                        Host is an exact DNS hostname, such as github.com. Substrate matches
+                        hostnames only, without port, path, or scheme.
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    prefix:
+                      description: Prefix is written before the Secret value, such
+                        as "Bearer " or "Basic ".
+                      type: string
+                    secretRef:
+                      description: SecretRef selects a key of a Secret in the Harness
+                        namespace.
+                      properties:
+                        key:
+                          description: The key of the secret to select from.  Must
+                            be a valid secret key.
+                          type: string
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                        optional:
+                          description: Specify whether the Secret or its key must
+                            be defined
+                          type: boolean
+                      required:
+                      - key
+                      type: object
+                      x-kubernetes-map-type: atomic
+                  required:
+                  - header
+                  - host
+                  - secretRef
+                  type: object
+                maxItems: 32
+                type: array
               kagent:
                 description: KagentHarness configures the kagent runtime adapter.
                 properties:

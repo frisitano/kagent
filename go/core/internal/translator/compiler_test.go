@@ -10,6 +10,7 @@ import (
 	atev1alpha1 "github.com/agent-substrate/substrate/pkg/api/v1alpha1"
 	"github.com/kagent-dev/kagent/go/api/adk"
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
+	"github.com/kagent-dev/kagent/go/core/internal/egress"
 	"github.com/kagent-dev/kagent/go/core/internal/substrate"
 	v2translator "github.com/kagent-dev/kagent/go/core/internal/translator"
 	byotranslator "github.com/kagent-dev/kagent/go/core/internal/translator/byo"
@@ -98,6 +99,33 @@ func TestCompileAgentTemplatePreservesWorkloadOverrides(t *testing.T) {
 			require.Equal(t, tt.args, container.Args, "container args must not alias the compiled revision")
 		})
 	}
+}
+
+func TestCompileAgentTemplateAllowsHostCredentialHosts(t *testing.T) {
+	harness := &v1alpha3.Harness{
+		ObjectMeta: metav1.ObjectMeta{Name: "kagent", Namespace: "test"},
+		Spec: v1alpha3.HarnessSpec{
+			Kagent:                &v1alpha3.KagentHarness{},
+			AllowedAgentTemplates: &v1alpha3.HarnessAgentTemplateAdmission{Selector: metav1.LabelSelector{}},
+			Workload:              v1alpha3.HarnessWorkload{Image: "example.com/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			Substrate: v1alpha3.HarnessSubstratePolicy{
+				WorkerPoolRef: corev1.LocalObjectReference{Name: "default"}, SnapshotPolicy: v1alpha3.HarnessSnapshotPolicy{Location: "snapshots"},
+			},
+			HostCredentials: []v1alpha3.HostCredential{{
+				Host: "github.com", Header: "Authorization", Prefix: "Basic ",
+				SecretRef: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "git"}, Key: "basic"},
+			}},
+		},
+	}
+	template := &v1alpha3.AgentTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test"},
+		Spec:       v1alpha3.AgentTemplateSpec{ModelConfig: &corev1.LocalObjectReference{Name: "default-model"}, SystemPrompt: "help"},
+	}
+	result, err := compiler(t, modelConfig()).CompileAgentTemplate(t.Context(), harness, template)
+	require.NoError(t, err)
+	require.Contains(t, result.EgressDestinations, "github.com")
+	require.True(t, slices.IsSorted(result.EgressDestinations))
+	require.Contains(t, result.Credentials, egress.Credential{Hostname: "github.com", Header: "authorization", Prefix: "Basic ", URI: "ate-secret://kubernetes.io/test/git/basic"})
 }
 
 func TestCompileAgentTemplatePinsAgentPluginSources(t *testing.T) {

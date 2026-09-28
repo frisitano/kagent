@@ -197,15 +197,21 @@ func (c *Compiler) provider(ctx context.Context, model *v1alpha3.ModelConfig) ([
 		if model.Spec.Anthropic != nil {
 			options := *model.Spec.Anthropic
 			baseURL = strings.TrimSpace(options.BaseURL)
-			options.BaseURL = ""
+			options.BaseURL, options.Authentication = "", ""
 			if !reflect.DeepEqual(options, v1alpha3.AnthropicConfig{}) {
-				return nil, nil, v2translator.NewValidationError("Claude does not support Anthropic provider options beyond baseUrl yet")
+				return nil, nil, v2translator.NewValidationError("Claude does not support Anthropic provider options beyond baseUrl and authentication yet")
 			}
 		}
 		if err := c.requireSecretKey(ctx, model, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey, false); err != nil {
 			return nil, nil, err
 		}
-		environment := []corev1.EnvVar{secretEnvironment(claudeconfig.AnthropicAPIKeyEnvName, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey)}
+		// Claude Code prefers ANTHROPIC_API_KEY over its OAuth token, so an
+		// OAuthToken credential sets only the token's placeholder.
+		name := claudeconfig.AnthropicAPIKeyEnvName
+		if model.Spec.Anthropic != nil && model.Spec.Anthropic.Authentication == v1alpha3.AnthropicAuthenticationOAuthToken {
+			name = claudeconfig.ClaudeCodeOAuthTokenEnvName
+		}
+		environment := []corev1.EnvVar{secretEnvironment(name, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey)}
 		egress := []string{"api.anthropic.com"}
 		if baseURL != "" {
 			hostname, err := anthropicBaseURLHostname(baseURL)

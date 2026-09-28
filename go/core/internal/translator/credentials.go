@@ -63,6 +63,12 @@ func CompileCredentials(input *HarnessInput, extraModels []*ResolvedModelConfig,
 	if err := visit(input.Root); err != nil {
 		return nil, nil, err
 	}
+	// Host credentials name a hostname, not a URL; CanonicalCredentials rejects
+	// anything else.
+	for _, host := range input.Harness.Spec.HostCredentials {
+		uri := "ate-secret://kubernetes.io/" + input.Harness.Namespace + "/" + host.SecretRef.Name + "/" + host.SecretRef.Key
+		bindings = append(bindings, egress.Credential{Hostname: host.Host, Header: host.Header, Prefix: host.Prefix, URI: uri})
+	}
 	for _, resolved := range models {
 		model := resolved.Config
 		if model.Spec.APIKeyPassthrough || model.Spec.APIKeySecret == "" {
@@ -138,6 +144,9 @@ func modelCredentialTarget(resolved *ResolvedModelConfig) (name, endpoint, heade
 		}
 	case v1alpha3.ModelProviderAnthropic:
 		name, endpoint, header = env.AnthropicAPIKey.Name(), "https://api.anthropic.com", "x-api-key"
+		if spec.Anthropic != nil && spec.Anthropic.Authentication == v1alpha3.AnthropicAuthenticationOAuthToken {
+			name, header, prefix = env.ClaudeCodeOAuthToken.Name(), "authorization", "Bearer "
+		}
 		if spec.Anthropic != nil && spec.Anthropic.BaseURL != "" {
 			endpoint = spec.Anthropic.BaseURL
 		}
