@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"reflect"
 	"testing"
+	"time"
 
 	apiauthorization "github.com/kagent-dev/kagent/go/api/authorization"
 	"github.com/kagent-dev/kagent/go/core/internal/grpcserver"
@@ -114,6 +115,38 @@ func TestMetricsBindAddressNeverFallsBackToTheControllerRuntimeDefault(t *testin
 			}
 			if got := metricsBindAddress(); got != testCase.want {
 				t.Fatalf("metricsBindAddress() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestSubstrateCallTimeout(t *testing.T) {
+	set := func(value string) *string { return &value }
+	for name, testCase := range map[string]struct {
+		value   *string
+		want    time.Duration
+		wantErr bool
+	}{
+		"unset keeps 30s": {value: nil, want: 30 * time.Second},
+		"raised":          {value: set("120s"), want: 2 * time.Minute},
+		"no deadline":     {value: set("0"), want: 0},
+		"missing unit":    {value: set("120"), wantErr: true},
+		"empty":           {value: set(""), wantErr: true},
+		"negative":        {value: set("-1s"), wantErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if testCase.value != nil {
+				t.Setenv("KAGENT_SUBSTRATE_CALL_TIMEOUT", *testCase.value)
+			}
+			got, err := substrateCallTimeout()
+			if testCase.wantErr {
+				if err == nil {
+					t.Fatalf("substrateCallTimeout() = %v, want an error", got)
+				}
+				return
+			}
+			if err != nil || got != testCase.want {
+				t.Fatalf("substrateCallTimeout() = %v, %v; want %v", got, err, testCase.want)
 			}
 		})
 	}

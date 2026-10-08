@@ -260,11 +260,15 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	callTimeout, err := substrateCallTimeout()
+	if err != nil {
+		return err
+	}
 	actors, err := substrate.Dial(ctx, substrate.Config{
 		AteAPIEndpoint: env("SUBSTRATE_ATE_API_ENDPOINT", "dns:///api.ate-system.svc:443"),
 		CAFile:         os.Getenv("SUBSTRATE_ATE_API_CA_FILE"),
 		ClientCertFile: os.Getenv("SUBSTRATE_ATE_API_CLIENT_CERT_FILE"),
-		CallTimeout:    30 * time.Second,
+		CallTimeout:    callTimeout,
 	})
 	if err != nil {
 		return err
@@ -390,6 +394,21 @@ func mergePolicies(defaults grpcserver.MethodPolicies, extra map[string]auth.Acc
 		merged[method] = access
 	}
 	return merged, nil
+}
+
+// substrateCallTimeout resolves KAGENT_SUBSTRATE_CALL_TIMEOUT. The registry's
+// Get falls back to the default on a malformed value; a typo here must stop
+// startup instead of silently restoring the 30s deadline.
+func substrateCallTimeout() (time.Duration, error) {
+	raw, set := os.LookupEnv(kagentenv.SubstrateCallTimeout.Name())
+	if !set {
+		return kagentenv.SubstrateCallTimeout.Get(), nil
+	}
+	timeout, err := time.ParseDuration(raw)
+	if err != nil || timeout < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative Go duration such as 120s, got %q", kagentenv.SubstrateCallTimeout.Name(), raw)
+	}
+	return timeout, nil
 }
 
 func env(name, fallback string) string {

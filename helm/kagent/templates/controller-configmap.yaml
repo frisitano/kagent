@@ -68,6 +68,9 @@ data:
   {{- end }}
   WATCH_NAMESPACES: {{ include "kagent.watchNamespaces" . | quote }}
   MCP_EGRESS_PLAINTEXT: {{ .Values.controller.mcpEgressPlaintext | default false | quote }}
+  {{- with .Values.controller.substrate.callTimeout }}
+  KAGENT_SUBSTRATE_CALL_TIMEOUT: {{ . | quote }}
+  {{- end }}
   {{- if .Values.controller.a2aClientTimeout }}
   KAGENT_A2A_CLIENT_TIMEOUT: {{ .Values.controller.a2aClientTimeout | quote }}
   {{- end }}

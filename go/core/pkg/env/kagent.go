@@ -1,5 +1,7 @@
 package env
 
+import "time"
+
 // Core kagent environment variables used by the controller and agent runtime.
 var (
 	LeaderElect = RegisterBoolVar(
@@ -55,6 +57,15 @@ var (
 			"0 (the default) means no timeout, which is recommended for long-running agents "+
 			"that stream responses over SSE. Set a positive duration (e.g. 30m) only if you "+
 			"need a hard upper bound on individual A2A calls.",
+		ComponentController,
+	)
+
+	SubstrateCallTimeout = RegisterDurationVar(
+		"KAGENT_SUBSTRATE_CALL_TIMEOUT",
+		30*time.Second,
+		"Deadline for each controller call to Substrate's ate-api, including SuspendActor, "+
+			"ResumeActor and PauseActor. Raise it when restoring large Actors takes longer. "+
+			"0 means no deadline.",
 		ComponentController,
 	)
 

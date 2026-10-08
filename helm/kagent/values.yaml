@@ -420,6 +420,11 @@ controller:
     defaultWorkerPool:
       namespace: ""
       name: ""
+    # -- Deadline for each controller call to Substrate's ate-api (SuspendActor,
+    # ResumeActor, PauseActor and the rest), as a Go duration such as "120s".
+    # Raise it when restoring large Actors takes longer than the default.
+    # @default -- "" (30s)
+    callTimeout: ""
     # Example when enabled:
     #   enabled: true
     #   ateApiEndpoint: "dns:///api.ate-system.svc:443"

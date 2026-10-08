@@ -182,6 +182,23 @@ tests:
           path: data.KAGENT_GATEWAY_URL
           value: "https://agents.example.com"
 
+  - it: should leave the Substrate call timeout at the controller default
+    template: controller-configmap.yaml
+    asserts:
+      - notExists:
+          path: data.KAGENT_SUBSTRATE_CALL_TIMEOUT
+
+  - it: should set KAGENT_SUBSTRATE_CALL_TIMEOUT when set
+    template: controller-configmap.yaml
+    set:
+      controller:
+        substrate:
+          callTimeout: 120s
+    asserts:
+      - equal:
+          path: data.KAGENT_SUBSTRATE_CALL_TIMEOUT
+          value: "120s"
+
   - it: should set PROXY_URL when set
     template: controller-configmap.yaml
     set:
