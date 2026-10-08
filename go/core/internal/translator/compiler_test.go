@@ -348,7 +348,7 @@ func TestCompileAgentTemplateResolvesHarnessDataVolume(t *testing.T) {
 
 	durable, err := compile(t)
 	require.NoError(t, err)
-	require.Nil(t, durable.DataVolume, "without annotations /data stays a DurableDir")
+	require.Empty(t, durable.Volumes, "without annotations /data stays a DurableDir")
 
 	harness.Annotations = map[string]string{
 		v2translator.DataVolumeStorageClassAnnotation: "agent-data",
@@ -356,7 +356,7 @@ func TestCompileAgentTemplateResolvesHarnessDataVolume(t *testing.T) {
 	}
 	external, err := compile(t)
 	require.NoError(t, err)
-	require.Equal(t, &v2translator.DataVolume{StorageClassName: "agent-data", Capacity: "20Gi"}, external.DataVolume)
+	require.Equal(t, []v2translator.Volume{{Name: "data", MountPath: "/data", StorageClassName: "agent-data", Capacity: "20Gi"}}, external.Volumes)
 
 	delete(harness.Annotations, v2translator.DataVolumeCapacityAnnotation)
 	_, err = compile(t)

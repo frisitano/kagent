@@ -120,41 +120,6 @@ func TestActorTemplateForRevision(t *testing.T) {
 	}
 }
 
-func TestActorTemplateDataVolume(t *testing.T) {
-	spec := &translator.Revision{
-		Namespace: "agents", AgentTemplateName: "helper", HarnessName: "kagent", WorkerPoolName: "pool",
-		AgentCard: &a2apb.AgentCard{Name: "helper", Version: "v1", Capabilities: &a2apb.AgentCapabilities{Streaming: new(true)},
-			SupportedInterfaces: []*a2apb.AgentInterface{{Url: "http://127.0.0.1:80", ProtocolBinding: "GRPC", ProtocolVersion: "1.0"}},
-			DefaultInputModes:   []string{"text"}, DefaultOutputModes: []string{"text"},
-		},
-	}
-	dataVolume := func(t *testing.T) *ateapipb.Volume {
-		t.Helper()
-		id, err := spec.Digest()
-		require.NoError(t, err)
-		template, err := ActorTemplateForRevision(spec, id)
-		require.NoError(t, err)
-		require.Equal(t, &ateapipb.VolumeMount{Name: durableDataVolume, MountPath: durableDataMount}, template.GetContainers()[0].GetVolumeMounts()[0])
-		for _, volume := range template.GetVolumes() {
-			if volume.GetName() == durableDataVolume {
-				return volume
-			}
-		}
-		t.Fatal("no data volume")
-		return nil
-	}
-
-	t.Run("durable dir by default", func(t *testing.T) {
-		require.True(t, proto.Equal(&ateapipb.Volume{Name: durableDataVolume, DurableDir: &ateapipb.DurableDirVolumeSource{}}, dataVolume(t)))
-	})
-	t.Run("external volume when configured", func(t *testing.T) {
-		spec.DataVolume = &translator.DataVolume{StorageClassName: "agent-data", Capacity: "20Gi"}
-		require.True(t, proto.Equal(&ateapipb.Volume{Name: durableDataVolume, ExternalVolumeTemplate: &ateapipb.ExternalVolumeTemplate{
-			Capacity: "20Gi", StorageClassName: "agent-data",
-		}}, dataVolume(t)))
-	})
-}
-
 func TestActorTemplateStampsTheRevisionOnTheResource(t *testing.T) {
 	spec := &translator.Revision{
 		Namespace: "agents", AgentTemplateName: "helper", HarnessName: "kagent", WorkerPoolName: "default",
@@ -201,4 +166,78 @@ func TestActorTemplateSpecEqualIgnoresServerFields(t *testing.T) {
 	if ActorTemplateSpecEqual(left, right) {
 		t.Fatal("different container image was accepted")
 	}
+}
+
+func TestActorTemplateExternalVolumes(t *testing.T) {
+	spec := &translator.Revision{
+		Namespace: "agents", AgentTemplateName: "helper", HarnessName: "byo",
+		Image:          "agent.example/image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		WorkerPoolName: "default", SnapshotLocation: "snapshots",
+		AgentCard: &a2apb.AgentCard{Name: "helper", Version: "v1", Capabilities: &a2apb.AgentCapabilities{Streaming: new(true)},
+			SupportedInterfaces: []*a2apb.AgentInterface{{Url: "http://127.0.0.1:80", ProtocolBinding: "GRPC", ProtocolVersion: "1.0"}},
+			DefaultInputModes:   []string{"text"}, DefaultOutputModes: []string{"text"},
+		},
+	}
+	revisionID, err := spec.Digest()
+	require.NoError(t, err)
+	template, err := ActorTemplateForRevision(spec, revisionID)
+	require.NoError(t, err)
+	require.NotNil(t, template.GetVolumes()[0].GetDurableDir(), "without volumes, /data stays a durable directory")
+	require.Len(t, template.GetVolumes(), 3)
+	requireOneDurableDir(t, template)
+
+	spec.Volumes = []translator.Volume{
+		{Name: "data", MountPath: "/data", StorageClassName: "agent-data", Capacity: "20Gi"},
+		{Name: "cache", MountPath: "/cache", StorageClassName: "shared-cache", Capacity: "100Gi"},
+	}
+	revisionID, err = spec.Digest()
+	require.NoError(t, err)
+	template, err = ActorTemplateForRevision(spec, revisionID)
+	require.NoError(t, err)
+	volumes := map[string]*ateapipb.Volume{}
+	for _, volume := range template.GetVolumes() {
+		volumes[volume.GetName()] = volume
+	}
+	mounts := map[string]string{}
+	for _, mount := range template.GetContainers()[0].GetVolumeMounts() {
+		mounts[mount.GetName()] = mount.GetMountPath()
+	}
+	require.True(t, proto.Equal(volumes["data"].GetExternalVolumeTemplate(), &ateapipb.ExternalVolumeTemplate{Capacity: "20Gi", StorageClassName: "agent-data"}))
+	require.Nil(t, volumes["data"].GetDurableDir())
+	require.True(t, proto.Equal(volumes["cache"].GetExternalVolumeTemplate(), &ateapipb.ExternalVolumeTemplate{Capacity: "100Gi", StorageClassName: "shared-cache"}))
+	// Substrate's gVisor DATA checkpoint needs one durable directory; it stays, empty, out of the way.
+	require.NotNil(t, volumes[durableStateVolume].GetDurableDir())
+	require.Equal(t, map[string]string{
+		"data": "/data", "cache": "/cache", durableStateVolume: durableStateMount,
+		egressTrustVolume: egressTrustMount, actorIdentityVolume: actorIdentityMount,
+	}, mounts)
+	require.Equal(t, ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_DATA, template.GetSnapshotsConfig().GetOnCommit())
+	requireOneDurableDir(t, template)
+
+	// A shared cache alone leaves /data durable, and adds no second durable directory.
+	spec.Volumes = []translator.Volume{{Name: "cache", MountPath: "/cache", StorageClassName: "shared-cache", Capacity: "100Gi"}}
+	revisionID, err = spec.Digest()
+	require.NoError(t, err)
+	template, err = ActorTemplateForRevision(spec, revisionID)
+	require.NoError(t, err)
+	require.NotNil(t, template.GetVolumes()[0].GetDurableDir())
+	requireOneDurableDir(t, template)
+
+	spec.Volumes = []translator.Volume{{Name: "data", MountPath: "/elsewhere", StorageClassName: "agent-data", Capacity: "1Gi"}}
+	_, err = ActorTemplateForRevision(spec, revisionID)
+	require.ErrorContains(t, err, "must be mounted at /data")
+}
+
+// requireOneDurableDir pins Substrate 0.2.0-beta5's gVisor Worker contract: a
+// DATA checkpoint with no durable directory never leaves SUSPENDING, and the
+// checkpoint is only meant to hold one.
+func requireOneDurableDir(t *testing.T, template *ateapipb.ActorTemplate) {
+	t.Helper()
+	var durable []string
+	for _, volume := range template.GetVolumes() {
+		if volume.GetDurableDir() != nil {
+			durable = append(durable, volume.GetName())
+		}
+	}
+	require.Len(t, durable, 1, "durable directories: %v", durable)
 }

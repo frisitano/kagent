@@ -37,54 +37,6 @@ func TestRevisionDigestIncludesSandboxClass(t *testing.T) {
 	require.True(t, invalid.IsZero())
 }
 
-func TestRevisionDigestIncludesDataVolume(t *testing.T) {
-	revision := &Revision{Namespace: "agents", AgentTemplateName: "helper", HarnessName: "kagent"}
-	durable, err := revision.Digest()
-	require.NoError(t, err)
-	require.Equal(t, "3edf8e1756778ce192e3c834e6ebd8e2421dc23e9d64ade7d6ee3c6d6897cd6d", durable.String(), "no data volume must preserve existing revisions")
-
-	revision.DataVolume = &DataVolume{StorageClassName: "agent-data", Capacity: "20Gi"}
-	external, err := revision.Digest()
-	require.NoError(t, err)
-	require.NotEqual(t, durable, external, "moving /data to an external volume must create a new revision")
-
-	revision.DataVolume = &DataVolume{StorageClassName: "agent-data", Capacity: "40Gi"}
-	resized, err := revision.Digest()
-	require.NoError(t, err)
-	require.NotEqual(t, external, resized)
-}
-
-func TestDataVolumeFromAnnotations(t *testing.T) {
-	for _, tt := range []struct {
-		name        string
-		annotations map[string]string
-		want        *DataVolume
-		wantErr     bool
-	}{
-		{name: "unset keeps the DurableDir"},
-		{name: "unrelated annotations", annotations: map[string]string{"other": "x"}},
-		{name: "both", annotations: map[string]string{DataVolumeStorageClassAnnotation: "agent-data", DataVolumeCapacityAnnotation: "20Gi"}, want: &DataVolume{StorageClassName: "agent-data", Capacity: "20Gi"}},
-		{name: "canonical capacity", annotations: map[string]string{DataVolumeStorageClassAnnotation: "agent-data", DataVolumeCapacityAnnotation: "20480Mi"}, want: &DataVolume{StorageClassName: "agent-data", Capacity: "20Gi"}},
-		{name: "class only", annotations: map[string]string{DataVolumeStorageClassAnnotation: "agent-data"}, wantErr: true},
-		{name: "capacity only", annotations: map[string]string{DataVolumeCapacityAnnotation: "20Gi"}, wantErr: true},
-		{name: "bad class", annotations: map[string]string{DataVolumeStorageClassAnnotation: "Agent_Data", DataVolumeCapacityAnnotation: "20Gi"}, wantErr: true},
-		{name: "bad capacity", annotations: map[string]string{DataVolumeStorageClassAnnotation: "agent-data", DataVolumeCapacityAnnotation: "twenty"}, wantErr: true},
-		{name: "zero capacity", annotations: map[string]string{DataVolumeStorageClassAnnotation: "agent-data", DataVolumeCapacityAnnotation: "0"}, wantErr: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := dataVolumeFromAnnotations(tt.annotations)
-			if tt.wantErr {
-				var invalid *ValidationError
-				require.ErrorAs(t, err, &invalid)
-				require.Nil(t, got)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestRevisionDigestIncludesProvenance(t *testing.T) {
 	revision := &Revision{Namespace: "agents", AgentTemplateName: "helper", HarnessName: "kagent", Provenance: []byte(`[{"kind":"ConfigMap","hash":"first"}]`)}
 	first, err := revision.Digest()
@@ -178,4 +130,71 @@ func TestRevisionDigestIncludesBinaryAgentCard(t *testing.T) {
 	revision.AgentCard.Name = string([]byte{0xff})
 	_, err = revision.Digest()
 	require.Error(t, err)
+}
+
+func TestRevisionDigestIncludesVolumesOnlyWhenSet(t *testing.T) {
+	revision := &Revision{Namespace: "agents", AgentTemplateName: "helper", HarnessName: "kagent"}
+	original, err := revision.Digest()
+	require.NoError(t, err)
+	require.Equal(t, "3edf8e1756778ce192e3c834e6ebd8e2421dc23e9d64ade7d6ee3c6d6897cd6d", original.String(), "a revision without volumes keeps its digest")
+
+	revision.Volumes = []Volume{{Name: "data", MountPath: "/data", StorageClassName: "agent-data", Capacity: "20Gi"}}
+	withData, err := revision.Digest()
+	require.NoError(t, err)
+	require.NotEqual(t, original, withData)
+	revision.Volumes[0].Capacity = "30Gi"
+	larger, err := revision.Digest()
+	require.NoError(t, err)
+	require.NotEqual(t, withData, larger)
+}
+
+func TestHarnessVolumes(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		annotations map[string]string
+		want        []Volume
+		err         string
+	}{
+		{name: "none"},
+		{name: "data", annotations: map[string]string{DataVolumeStorageClassAnnotation: "agent-data", DataVolumeCapacityAnnotation: "20480Mi"},
+			want: []Volume{{Name: "data", MountPath: "/data", StorageClassName: "agent-data", Capacity: "20Gi"}}},
+		{name: "data and a shared cache", annotations: map[string]string{
+			DataVolumeStorageClassAnnotation: "agent-data", DataVolumeCapacityAnnotation: "20Gi",
+			ExtraVolumesAnnotation: `[{"name":"cache","mountPath":"/cache","storageClassName":"shared-cache","capacity":"100Gi"}]`},
+			want: []Volume{
+				{Name: "data", MountPath: "/data", StorageClassName: "agent-data", Capacity: "20Gi"},
+				{Name: "cache", MountPath: "/cache", StorageClassName: "shared-cache", Capacity: "100Gi"},
+			}},
+		{name: "unrelated annotations", annotations: map[string]string{"other": "x"}},
+		{name: "a shared cache without a data volume", annotations: map[string]string{
+			ExtraVolumesAnnotation: `[{"name":"cache","mountPath":"/cache","storageClassName":"shared-cache","capacity":"100Gi"}]`},
+			want: []Volume{{Name: "cache", MountPath: "/cache", StorageClassName: "shared-cache", Capacity: "100Gi"}}},
+		{name: "class without capacity", annotations: map[string]string{DataVolumeStorageClassAnnotation: "agent-data"}, err: "must be set together"},
+		{name: "capacity without class", annotations: map[string]string{DataVolumeCapacityAnnotation: "20Gi"}, err: "must be set together"},
+		{name: "zero capacity", annotations: map[string]string{DataVolumeStorageClassAnnotation: "agent-data", DataVolumeCapacityAnnotation: "0"}, err: "positive quantity"},
+		{name: "extra not JSON", annotations: map[string]string{ExtraVolumesAnnotation: `cache=/cache`}, err: ExtraVolumesAnnotation},
+		{name: "extra named durable-state", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"durable-state","mountPath":"/cache","storageClassName":"c","capacity":"1Gi"}]`}, err: "reserved or repeated"},
+		{name: "extra repeated path", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"/a","storageClassName":"c","capacity":"1Gi"},{"name":"b","mountPath":"/a","storageClassName":"c","capacity":"1Gi"}]`}, err: "reserved or repeated"},
+		{name: "extra relative path", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"cache","storageClassName":"c","capacity":"1Gi"}]`}, err: "clean absolute path"},
+		{name: "bad capacity", annotations: map[string]string{DataVolumeStorageClassAnnotation: "agent-data", DataVolumeCapacityAnnotation: "lots"}, err: "positive quantity"},
+		{name: "bad class", annotations: map[string]string{DataVolumeStorageClassAnnotation: "Agent_Data", DataVolumeCapacityAnnotation: "1Gi"}, err: "storageClassName"},
+		{name: "extra named data", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"data","mountPath":"/cache","storageClassName":"c","capacity":"1Gi"}]`}, err: "reserved or repeated"},
+		{name: "extra at /data", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"cache","mountPath":"/data","storageClassName":"c","capacity":"1Gi"}]`}, err: "reserved or repeated"},
+		{name: "extra under /run/kagent", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"cache","mountPath":"/run/kagent/x","storageClassName":"c","capacity":"1Gi"}]`}, err: "reserved or repeated"},
+		{name: "extra repeated", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"/a","storageClassName":"c","capacity":"1Gi"},{"name":"a","mountPath":"/b","storageClassName":"c","capacity":"1Gi"}]`}, err: "reserved or repeated"},
+		{name: "extra unclean path", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"/a/../b","storageClassName":"c","capacity":"1Gi"}]`}, err: "clean absolute path"},
+		{name: "extra unknown field", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"/a","storageClassName":"c","capacity":"1Gi","readOnly":true}]`}, err: "unknown field"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			volumes, err := harnessVolumes(test.annotations)
+			if test.err != "" {
+				require.ErrorContains(t, err, test.err)
+				var invalid *ValidationError
+				require.ErrorAs(t, err, &invalid, "a bad annotation must surface on the AgentTemplate status")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.want, volumes)
+		})
+	}
 }

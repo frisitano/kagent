@@ -58,9 +58,8 @@ type Revision struct {
 	WorkerPoolName   string
 	SandboxClass     atev1alpha1.SandboxClass
 	SnapshotLocation string
-	// DataVolume, when set, backs /data with a per-Actor external volume
-	// instead of a DurableDir, so snapshots no longer carry /data.
-	DataVolume *DataVolume
+	// Volumes are the Harness's external volumes; one named "data" replaces the durable /data directory.
+	Volumes []Volume
 
 	// Provenance identifies non-secret Kubernetes inputs. Gateway-fetched
 	// credential values are deliberately excluded from revision identity.
@@ -71,12 +70,12 @@ type Revision struct {
 	EgressDestinations []string
 }
 
-// DataVolume is a per-Actor CSI volume provisioned by Substrate. It lives as
-// long as its Actor and is not part of any snapshot.
-type DataVolume struct {
+// Volume is an external volume created per Actor from a StorageClass.
+type Volume struct {
+	Name             string `json:"name"`
+	MountPath        string `json:"mountPath"`
 	StorageClassName string `json:"storageClassName"`
-	// Capacity is a canonical Kubernetes quantity, such as 20Gi.
-	Capacity string `json:"capacity"`
+	Capacity         string `json:"capacity"`
 }
 
 // Equals compares the Agent Card's contents without inspecting protobuf caches.
@@ -116,14 +115,14 @@ func (r *Revision) Digest() (RevisionID, error) {
 		Credentials        []egress.Credential      `json:"credentials,omitempty"`
 		EgressDestinations []string                 `json:"egressDestinations"`
 		SandboxClass       atev1alpha1.SandboxClass `json:"sandboxClass,omitempty"`
-		// Omitted when unset to preserve DurableDir revision digests.
-		DataVolume *DataVolume `json:"dataVolume,omitempty"`
+		// Omitted when empty to preserve the digests of revisions without volumes.
+		Volumes []Volume `json:"volumes,omitempty"`
 	}{
 		Namespace: r.Namespace, AgentTemplateName: r.AgentTemplateName, HarnessName: r.HarnessName,
 		Image: r.Image, Command: r.Command, Args: r.Args, Environment: r.Environment, ConfigJSON: r.ConfigJSON,
 		WorkerPoolName: r.WorkerPoolName, SnapshotLocation: r.SnapshotLocation, Provenance: r.Provenance,
 		Credentials: r.Credentials, EgressDestinations: r.EgressDestinations,
-		SandboxClass: sandboxClass, DataVolume: r.DataVolume,
+		SandboxClass: sandboxClass, Volumes: r.Volumes,
 	})
 	if err != nil {
 		return RevisionID{}, fmt.Errorf("marshal runtime revision inputs: %w", err)

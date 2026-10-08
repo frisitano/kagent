@@ -23,6 +23,10 @@ const (
 	defaultContainerName = "kagent"
 	durableDataVolume    = "data"
 	durableDataMount     = "/data"
+	// durableStateVolume stays empty: the durable directory Substrate's DATA checkpoint requires when
+	// /data is an external volume.
+	durableStateVolume = "durable-state"
+	durableStateMount  = "/run/kagent/durable-state"
 )
 
 const egressTrustVolume = "egress-trust"
@@ -84,6 +88,30 @@ func ActorTemplateForRevision(spec *translator.Revision, revisionID translator.R
 		return nil, err
 	}
 
+	// /data is a durable directory, archived on every suspend, unless the Harness gives it an external
+	// volume, which Substrate attaches with the Actor and never snapshots. Substrate 0.2.0-beta5's gVisor
+	// Worker refuses a DATA-scope checkpoint with no durable directory at all ("no durable-dir volumes
+	// found for DATA snapshot"), so an empty one stays, mounted where nothing writes.
+	dataVolume := &ateapipb.Volume{Name: durableDataVolume, DurableDir: &ateapipb.DurableDirVolumeSource{}}
+	var externalVolumes []*ateapipb.Volume
+	var externalMounts []*ateapipb.VolumeMount
+	for _, volume := range spec.Volumes {
+		external := &ateapipb.Volume{Name: volume.Name, ExternalVolumeTemplate: &ateapipb.ExternalVolumeTemplate{
+			Capacity: volume.Capacity, StorageClassName: volume.StorageClassName,
+		}}
+		if volume.Name == durableDataVolume {
+			if volume.MountPath != durableDataMount {
+				return nil, fmt.Errorf("volume %q must be mounted at %s", durableDataVolume, durableDataMount)
+			}
+			dataVolume = external
+			externalVolumes = append(externalVolumes, &ateapipb.Volume{Name: durableStateVolume, DurableDir: &ateapipb.DurableDirVolumeSource{}})
+			externalMounts = append(externalMounts, &ateapipb.VolumeMount{Name: durableStateVolume, MountPath: durableStateMount})
+			continue
+		}
+		externalVolumes = append(externalVolumes, external)
+		externalMounts = append(externalMounts, &ateapipb.VolumeMount{Name: volume.Name, MountPath: volume.MountPath})
+	}
+
 	template := &ateapipb.ActorTemplate{
 		Metadata:      &ateapipb.ResourceMetadata{Atespace: spec.Namespace, Name: name},
 		SandboxConfig: sandboxConfig,
@@ -97,11 +125,11 @@ func ActorTemplateForRevision(spec *translator.Revision, revisionID translator.R
 				Path: "/readyz",
 				Port: 8081,
 			}, TimeoutSeconds: 30},
-			VolumeMounts: []*ateapipb.VolumeMount{
+			VolumeMounts: append([]*ateapipb.VolumeMount{
 				{Name: durableDataVolume, MountPath: durableDataMount},
 				{Name: egressTrustVolume, MountPath: egressTrustMount},
 				{Name: actorIdentityVolume, MountPath: actorIdentityMount},
-			},
+			}, externalMounts...),
 		}},
 		WorkerSelector: workerSelectorForPool(workerKey),
 		SnapshotsConfig: &ateapipb.SnapshotsConfig{
@@ -110,8 +138,8 @@ func ActorTemplateForRevision(spec *translator.Revision, revisionID translator.R
 			OnCommit:        ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_DATA,
 			OnResume:        &ateapipb.OnResumeConfig{FromData: ateapipb.ResumeSource_RESUME_SOURCE_GOLDEN},
 		},
-		Volumes: []*ateapipb.Volume{
-			dataVolumeSource(spec.DataVolume),
+		Volumes: append([]*ateapipb.Volume{
+			dataVolume,
 			// Substrate regenerates this projection on Run and Restore. A fork
 			// therefore routes storage calls as its own actor, never its source.
 			{Name: actorIdentityVolume, SystemInfo: &ateapipb.SystemInfoVolumeSource{DataSources: []*ateapipb.SystemInfoDataSource{
@@ -124,21 +152,9 @@ func ActorTemplateForRevision(spec *translator.Revision, revisionID translator.R
 			{Name: egressTrustVolume, SystemInfo: &ateapipb.SystemInfoVolumeSource{DataSources: []*ateapipb.SystemInfoDataSource{
 				{TrustBundle: &ateapipb.TrustBundleDataSource{Name: "egress-mitm.ate.dev", Path: "trust-bundle.pem"}},
 			}}},
-		},
+		}, externalVolumes...),
 	}
 	return template, nil
-}
-
-// dataVolumeSource backs /data with the revision's external volume, or with a
-// DurableDir that every snapshot carries when none is configured.
-func dataVolumeSource(volume *translator.DataVolume) *ateapipb.Volume {
-	if volume == nil {
-		return &ateapipb.Volume{Name: durableDataVolume, DurableDir: &ateapipb.DurableDirVolumeSource{}}
-	}
-	return &ateapipb.Volume{Name: durableDataVolume, ExternalVolumeTemplate: &ateapipb.ExternalVolumeTemplate{
-		Capacity:         volume.Capacity,
-		StorageClassName: volume.StorageClassName,
-	}}
 }
 
 // ActorTemplateSpecEqual compares the client-owned immutable fields of two
