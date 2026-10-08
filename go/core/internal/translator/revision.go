@@ -58,6 +58,9 @@ type Revision struct {
 	WorkerPoolName   string
 	SandboxClass     atev1alpha1.SandboxClass
 	SnapshotLocation string
+	// DataVolume, when set, backs /data with a per-Actor external volume
+	// instead of a DurableDir, so snapshots no longer carry /data.
+	DataVolume *DataVolume
 
 	// Provenance identifies non-secret Kubernetes inputs. Gateway-fetched
 	// credential values are deliberately excluded from revision identity.
@@ -66,6 +69,14 @@ type Revision struct {
 	Credentials []egress.Credential
 	// EgressDestinations is the hostname allowlist required by this revision.
 	EgressDestinations []string
+}
+
+// DataVolume is a per-Actor CSI volume provisioned by Substrate. It lives as
+// long as its Actor and is not part of any snapshot.
+type DataVolume struct {
+	StorageClassName string `json:"storageClassName"`
+	// Capacity is a canonical Kubernetes quantity, such as 20Gi.
+	Capacity string `json:"capacity"`
 }
 
 // Equals compares the Agent Card's contents without inspecting protobuf caches.
@@ -105,12 +116,14 @@ func (r *Revision) Digest() (RevisionID, error) {
 		Credentials        []egress.Credential      `json:"credentials,omitempty"`
 		EgressDestinations []string                 `json:"egressDestinations"`
 		SandboxClass       atev1alpha1.SandboxClass `json:"sandboxClass,omitempty"`
+		// Omitted when unset to preserve DurableDir revision digests.
+		DataVolume *DataVolume `json:"dataVolume,omitempty"`
 	}{
 		Namespace: r.Namespace, AgentTemplateName: r.AgentTemplateName, HarnessName: r.HarnessName,
 		Image: r.Image, Command: r.Command, Args: r.Args, Environment: r.Environment, ConfigJSON: r.ConfigJSON,
 		WorkerPoolName: r.WorkerPoolName, SnapshotLocation: r.SnapshotLocation, Provenance: r.Provenance,
 		Credentials: r.Credentials, EgressDestinations: r.EgressDestinations,
-		SandboxClass: sandboxClass,
+		SandboxClass: sandboxClass, DataVolume: r.DataVolume,
 	})
 	if err != nil {
 		return RevisionID{}, fmt.Errorf("marshal runtime revision inputs: %w", err)

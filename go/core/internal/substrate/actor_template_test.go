@@ -120,6 +120,41 @@ func TestActorTemplateForRevision(t *testing.T) {
 	}
 }
 
+func TestActorTemplateDataVolume(t *testing.T) {
+	spec := &translator.Revision{
+		Namespace: "agents", AgentTemplateName: "helper", HarnessName: "kagent", WorkerPoolName: "pool",
+		AgentCard: &a2apb.AgentCard{Name: "helper", Version: "v1", Capabilities: &a2apb.AgentCapabilities{Streaming: new(true)},
+			SupportedInterfaces: []*a2apb.AgentInterface{{Url: "http://127.0.0.1:80", ProtocolBinding: "GRPC", ProtocolVersion: "1.0"}},
+			DefaultInputModes:   []string{"text"}, DefaultOutputModes: []string{"text"},
+		},
+	}
+	dataVolume := func(t *testing.T) *ateapipb.Volume {
+		t.Helper()
+		id, err := spec.Digest()
+		require.NoError(t, err)
+		template, err := ActorTemplateForRevision(spec, id)
+		require.NoError(t, err)
+		require.Equal(t, &ateapipb.VolumeMount{Name: durableDataVolume, MountPath: durableDataMount}, template.GetContainers()[0].GetVolumeMounts()[0])
+		for _, volume := range template.GetVolumes() {
+			if volume.GetName() == durableDataVolume {
+				return volume
+			}
+		}
+		t.Fatal("no data volume")
+		return nil
+	}
+
+	t.Run("durable dir by default", func(t *testing.T) {
+		require.True(t, proto.Equal(&ateapipb.Volume{Name: durableDataVolume, DurableDir: &ateapipb.DurableDirVolumeSource{}}, dataVolume(t)))
+	})
+	t.Run("external volume when configured", func(t *testing.T) {
+		spec.DataVolume = &translator.DataVolume{StorageClassName: "agent-data", Capacity: "20Gi"}
+		require.True(t, proto.Equal(&ateapipb.Volume{Name: durableDataVolume, ExternalVolumeTemplate: &ateapipb.ExternalVolumeTemplate{
+			Capacity: "20Gi", StorageClassName: "agent-data",
+		}}, dataVolume(t)))
+	})
+}
+
 func TestActorTemplateStampsTheRevisionOnTheResource(t *testing.T) {
 	spec := &translator.Revision{
 		Namespace: "agents", AgentTemplateName: "helper", HarnessName: "kagent", WorkerPoolName: "default",

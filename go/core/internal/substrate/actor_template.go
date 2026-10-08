@@ -111,7 +111,7 @@ func ActorTemplateForRevision(spec *translator.Revision, revisionID translator.R
 			OnResume:        &ateapipb.OnResumeConfig{FromData: ateapipb.ResumeSource_RESUME_SOURCE_GOLDEN},
 		},
 		Volumes: []*ateapipb.Volume{
-			{Name: durableDataVolume, DurableDir: &ateapipb.DurableDirVolumeSource{}},
+			dataVolumeSource(spec.DataVolume),
 			// Substrate regenerates this projection on Run and Restore. A fork
 			// therefore routes storage calls as its own actor, never its source.
 			{Name: actorIdentityVolume, SystemInfo: &ateapipb.SystemInfoVolumeSource{DataSources: []*ateapipb.SystemInfoDataSource{
@@ -127,6 +127,18 @@ func ActorTemplateForRevision(spec *translator.Revision, revisionID translator.R
 		},
 	}
 	return template, nil
+}
+
+// dataVolumeSource backs /data with the revision's external volume, or with a
+// DurableDir that every snapshot carries when none is configured.
+func dataVolumeSource(volume *translator.DataVolume) *ateapipb.Volume {
+	if volume == nil {
+		return &ateapipb.Volume{Name: durableDataVolume, DurableDir: &ateapipb.DurableDirVolumeSource{}}
+	}
+	return &ateapipb.Volume{Name: durableDataVolume, ExternalVolumeTemplate: &ateapipb.ExternalVolumeTemplate{
+		Capacity:         volume.Capacity,
+		StorageClassName: volume.StorageClassName,
+	}}
 }
 
 // ActorTemplateSpecEqual compares the client-owned immutable fields of two

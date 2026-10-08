@@ -7,9 +7,11 @@ import (
 
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
 	"istio.io/istio/pkg/kube/krt"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // Compiler resolves public API objects into a complete, immutable runtime
@@ -117,7 +119,38 @@ func (c *Compiler) CompileAgentTemplate(ctx context.Context, harness *v1alpha3.H
 		return nil, &WorkerPoolNotFoundError{WorkerPool: workerKey}
 	}
 	result.SandboxClass = (*workerPool).Spec.SandboxClass
+	if result.DataVolume, err = dataVolumeFromAnnotations(harness.Annotations); err != nil {
+		return nil, err
+	}
 	return result, nil
+}
+
+// Harness annotations that move /data onto a per-Actor CSI volume. They are
+// annotations, not spec fields, so the fork keeps upstream's CRDs.
+const (
+	DataVolumeStorageClassAnnotation = "kagent.dev/data-volume-storage-class"
+	DataVolumeCapacityAnnotation     = "kagent.dev/data-volume-capacity"
+)
+
+// dataVolumeFromAnnotations returns nil, keeping the DurableDir, when neither
+// annotation is set.
+func dataVolumeFromAnnotations(annotations map[string]string) (*DataVolume, error) {
+	storageClass, hasClass := annotations[DataVolumeStorageClassAnnotation]
+	capacity, hasCapacity := annotations[DataVolumeCapacityAnnotation]
+	if !hasClass && !hasCapacity {
+		return nil, nil
+	}
+	if !hasClass || !hasCapacity {
+		return nil, NewValidationError("Harness annotations %s and %s must be set together", DataVolumeStorageClassAnnotation, DataVolumeCapacityAnnotation)
+	}
+	if problems := validation.IsDNS1123Subdomain(storageClass); len(problems) > 0 {
+		return nil, NewValidationError("Harness annotation %s: %q is not a StorageClass name", DataVolumeStorageClassAnnotation, storageClass)
+	}
+	quantity, err := resource.ParseQuantity(capacity)
+	if err != nil || quantity.Sign() <= 0 {
+		return nil, NewValidationError("Harness annotation %s: %q is not a positive quantity such as 20Gi", DataVolumeCapacityAnnotation, capacity)
+	}
+	return &DataVolume{StorageClassName: storageClass, Capacity: quantity.String()}, nil
 }
 
 func harnessType(harness *v1alpha3.Harness) HarnessType {

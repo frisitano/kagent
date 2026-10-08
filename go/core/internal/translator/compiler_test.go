@@ -327,6 +327,43 @@ func TestCompileAgentTemplateResolvesWorkerPoolSandboxClass(t *testing.T) {
 	}
 }
 
+func TestCompileAgentTemplateResolvesHarnessDataVolume(t *testing.T) {
+	harness := &v1alpha3.Harness{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: "byo"},
+		Spec: v1alpha3.HarnessSpec{
+			BYO:                   &v1alpha3.BYOHarness{},
+			AllowedAgentTemplates: &v1alpha3.HarnessAgentTemplateAdmission{Selector: metav1.LabelSelector{}},
+			Workload:              v1alpha3.HarnessWorkload{Image: "example.com/agent@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Command: []string{"/agent"}},
+			Substrate: v1alpha3.HarnessSubstratePolicy{
+				WorkerPoolRef: corev1.LocalObjectReference{Name: "selected"}, SnapshotPolicy: v1alpha3.HarnessSnapshotPolicy{Location: "snapshots"},
+			},
+		},
+	}
+	template := &v1alpha3.AgentTemplate{ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: "assistant"}, Spec: v1alpha3.AgentTemplateSpec{SystemPrompt: "help"}}
+	compile := func(t *testing.T) (*v2translator.CompileResult, error) {
+		t.Helper()
+		pool := &atev1alpha1.WorkerPool{ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: "selected"}}
+		return compiler(t, pool).CompileAgentTemplate(t.Context(), harness, template)
+	}
+
+	durable, err := compile(t)
+	require.NoError(t, err)
+	require.Nil(t, durable.DataVolume, "without annotations /data stays a DurableDir")
+
+	harness.Annotations = map[string]string{
+		v2translator.DataVolumeStorageClassAnnotation: "agent-data",
+		v2translator.DataVolumeCapacityAnnotation:     "20Gi",
+	}
+	external, err := compile(t)
+	require.NoError(t, err)
+	require.Equal(t, &v2translator.DataVolume{StorageClassName: "agent-data", Capacity: "20Gi"}, external.DataVolume)
+
+	delete(harness.Annotations, v2translator.DataVolumeCapacityAnnotation)
+	_, err = compile(t)
+	var invalid *v2translator.ValidationError
+	require.ErrorAs(t, err, &invalid, "half a data volume must not compile")
+}
+
 func TestCompileAgentTemplateStructuredOutput(t *testing.T) {
 	harness := &v1alpha3.Harness{
 		ObjectMeta: metav1.ObjectMeta{Name: "kagent", Namespace: "test"},
