@@ -223,6 +223,23 @@ func TestActorTemplateExternalVolumes(t *testing.T) {
 	require.NotNil(t, template.GetVolumes()[0].GetDurableDir())
 	requireOneDurableDir(t, template)
 
+	// An image volume is mounted read-only from the image, and adds no durable directory.
+	spec.Volumes = []translator.Volume{{Name: "nix-shared", MountPath: "/nix/shared", Image: "registry.example/store@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+	revisionID, err = spec.Digest()
+	require.NoError(t, err)
+	template, err = ActorTemplateForRevision(spec, revisionID)
+	require.NoError(t, err)
+	var image *ateapipb.Volume
+	for _, volume := range template.GetVolumes() {
+		if volume.GetName() == "nix-shared" {
+			image = volume
+		}
+	}
+	require.NotNil(t, image)
+	require.Equal(t, "registry.example/store@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", image.GetImage().GetReference())
+	require.NotNil(t, template.GetVolumes()[0].GetDurableDir())
+	requireOneDurableDir(t, template)
+
 	spec.Volumes = []translator.Volume{{Name: "data", MountPath: "/elsewhere", StorageClassName: "agent-data", Capacity: "1Gi"}}
 	_, err = ActorTemplateForRevision(spec, revisionID)
 	require.ErrorContains(t, err, "must be mounted at /data")

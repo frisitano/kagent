@@ -70,12 +70,16 @@ type Revision struct {
 	EgressDestinations []string
 }
 
-// Volume is an external volume created per Actor from a StorageClass.
+// Volume is an external volume created per Actor from a StorageClass, or, with Image, an OCI image
+// mounted read-only: each Worker pulls it once and every Actor on it shares the copy, outside every
+// snapshot.
 type Volume struct {
 	Name             string `json:"name"`
 	MountPath        string `json:"mountPath"`
-	StorageClassName string `json:"storageClassName"`
-	Capacity         string `json:"capacity"`
+	StorageClassName string `json:"storageClassName,omitempty"`
+	Capacity         string `json:"capacity,omitempty"`
+	// Image is an image reference pinned by digest; StorageClassName and Capacity are then unset.
+	Image string `json:"image,omitempty"`
 }
 
 // Equals compares the Agent Card's contents without inspecting protobuf caches.

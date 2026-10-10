@@ -183,6 +183,12 @@ func TestHarnessVolumes(t *testing.T) {
 		{name: "extra under /run/kagent", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"cache","mountPath":"/run/kagent/x","storageClassName":"c","capacity":"1Gi"}]`}, err: "reserved or repeated"},
 		{name: "extra repeated", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"/a","storageClassName":"c","capacity":"1Gi"},{"name":"a","mountPath":"/b","storageClassName":"c","capacity":"1Gi"}]`}, err: "reserved or repeated"},
 		{name: "extra unclean path", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"/a/../b","storageClassName":"c","capacity":"1Gi"}]`}, err: "clean absolute path"},
+		{name: "a store image", annotations: map[string]string{
+			ExtraVolumesAnnotation: `[{"name":"nix-shared","mountPath":"/nix/shared","image":"registry.example/store@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]`},
+			want: []Volume{{Name: "nix-shared", MountPath: "/nix/shared", Image: "registry.example/store@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}},
+		{name: "an image by tag", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"/a","image":"registry.example/store:latest"}]`}, err: "pinned by digest"},
+		{name: "an image with a capacity", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"/a","image":"registry.example/store@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","capacity":"1Gi"}]`}, err: "no storageClassName or capacity"},
+		{name: "an image named data", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"data","mountPath":"/x","image":"registry.example/store@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]`}, err: "reserved or repeated"},
 		{name: "extra unknown field", annotations: map[string]string{ExtraVolumesAnnotation: `[{"name":"a","mountPath":"/a","storageClassName":"c","capacity":"1Gi","readOnly":true}]`}, err: "unknown field"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

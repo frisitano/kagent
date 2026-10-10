@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
@@ -306,7 +307,7 @@ const (
 	DataVolumeCapacityAnnotation     = "kagent.dev/data-volume-capacity"
 	// ExtraVolumesAnnotation is a JSON list of further volumes, [{"name", "mountPath",
 	// "storageClassName", "capacity"}]. A StorageClass that maps every Actor to one directory makes one
-	// shared between Actors.
+	// shared between Actors. {"name", "mountPath", "image"} mounts an image pinned by digest, read-only.
 	ExtraVolumesAnnotation = "kagent.dev/extra-volumes"
 )
 
@@ -361,6 +362,9 @@ func harnessVolumes(annotations map[string]string) ([]Volume, error) {
 	return volumes, nil
 }
 
+// pinnedImage is an image reference with a sha256 digest, as Substrate's image volumes require.
+var pinnedImage = regexp.MustCompile(`^[^\s@]+@sha256:[0-9a-f]{64}$`)
+
 // validVolume checks one volume and normalizes its capacity, so equal quantities digest alike.
 func validVolume(volume Volume) (Volume, error) {
 	if errs := validation.IsDNS1123Label(volume.Name); len(errs) != 0 {
@@ -368,6 +372,15 @@ func validVolume(volume Volume) (Volume, error) {
 	}
 	if !path.IsAbs(volume.MountPath) || path.Clean(volume.MountPath) != volume.MountPath || volume.MountPath == "/" || strings.ContainsAny(volume.MountPath, ":") {
 		return Volume{}, NewValidationError("volume %q: mountPath %q must be a clean absolute path", volume.Name, volume.MountPath)
+	}
+	if volume.Image != "" {
+		if volume.StorageClassName != "" || volume.Capacity != "" {
+			return Volume{}, NewValidationError("volume %q: an image volume has no storageClassName or capacity", volume.Name)
+		}
+		if !pinnedImage.MatchString(volume.Image) {
+			return Volume{}, NewValidationError("volume %q: image %q must be pinned by digest (name@sha256:<64 hex>)", volume.Name, volume.Image)
+		}
+		return volume, nil
 	}
 	if errs := validation.IsDNS1123Subdomain(volume.StorageClassName); len(errs) != 0 {
 		return Volume{}, NewValidationError("volume %q: storageClassName %q: %s", volume.Name, volume.StorageClassName, strings.Join(errs, "; "))

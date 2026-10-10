@@ -96,6 +96,14 @@ func ActorTemplateForRevision(spec *translator.Revision, revisionID translator.R
 	var externalVolumes []*ateapipb.Volume
 	var externalMounts []*ateapipb.VolumeMount
 	for _, volume := range spec.Volumes {
+		if volume.Image != "" {
+			if volume.Name == durableDataVolume {
+				return nil, fmt.Errorf("volume %q cannot be an image", durableDataVolume)
+			}
+			externalVolumes = append(externalVolumes, &ateapipb.Volume{Name: volume.Name, Image: &ateapipb.ImageVolumeSource{Reference: volume.Image}})
+			externalMounts = append(externalMounts, &ateapipb.VolumeMount{Name: volume.Name, MountPath: volume.MountPath})
+			continue
+		}
 		external := &ateapipb.Volume{Name: volume.Name, ExternalVolumeTemplate: &ateapipb.ExternalVolumeTemplate{
 			Capacity: volume.Capacity, StorageClassName: volume.StorageClassName,
 		}}
