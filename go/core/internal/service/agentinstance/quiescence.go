@@ -8,6 +8,8 @@ import (
 
 	"github.com/kagent-dev/kagent/go/pkg/logging"
 
+	kagentenv "github.com/kagent-dev/kagent/go/core/pkg/env"
+
 	"github.com/kagent-dev/kagent/go/core/internal/database"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -21,7 +23,18 @@ func (*ActorWorkflow) NeedLeaderElection() bool { return false }
 // Start pauses or suspends idle instances independently of task publication.
 // A periodic scan discovers settled work across API replicas and restarts.
 // Workers are bounded; task reads never wait for them.
+//
+// KAGENT_AUTOMATIC_QUIESCENCE=false returns at once and claims no boundary, so every instance stays
+// RUNNING until an explicit Suspend or Delete. An unclaimed boundary blocks nothing and is superseded
+// by the instance's next turn, so nothing accumulates; what does accumulate is the resident memory of
+// every live instance, which such a deployment manages by tearing agents down.
 func (w *ActorWorkflow) Start(ctx context.Context) error {
+	if !kagentenv.AutomaticQuiescence.Get() {
+		logging.FromContext(ctx).InfoContext(ctx, "automatic quiescence is off: no instance is paused or suspended without an explicit lifecycle call",
+			"variable", "KAGENT_AUTOMATIC_QUIESCENCE")
+		<-ctx.Done()
+		return nil
+	}
 	var workers sync.WaitGroup
 	for range 4 {
 		workers.Go(func() {

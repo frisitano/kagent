@@ -69,6 +69,19 @@ var (
 		ComponentController,
 	)
 
+	AutomaticQuiescence = RegisterBoolVar(
+		"KAGENT_AUTOMATIC_QUIESCENCE",
+		true,
+		"Pause or suspend an AgentInstance automatically when its work settles. True (the default) "+
+			"is kagent's own behaviour: the idle lifecycle worker suspends an instance whose task "+
+			"reached a terminal state and pauses one waiting for input, so an idle agent holds no "+
+			"Worker. Set false to keep every instance RUNNING until an explicit Suspend or Delete, "+
+			"for a deployment whose agents are long-lived interactive sessions rather than "+
+			"request-scoped work. The idle worker then claims no boundary at all, and the resident "+
+			"memory of every live instance is the operator's to manage.",
+		ComponentController,
+	)
+
 	// Variables injected into agent pods (not read by the controller itself).
 
 	KagentName = RegisterStringVar(
